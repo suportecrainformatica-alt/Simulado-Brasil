@@ -338,16 +338,21 @@ export const apiClient = {
   },
 
   // POST add new exam (Admin)
-  async createExam(examData: { title: string; description: string; category: string; durationMinutes: number; questions: Question[]; adminToken: string }): Promise<{ success: boolean; examId: string }> {
+  async createExam(examData: { title: string; description: string; category: string; durationMinutes: number; questions: Question[]; adminToken: string; replaceIfExists?: boolean }): Promise<{ success: boolean; examId?: string; error?: string; conflict?: boolean }> {
     try {
       const res = await fetch('/api/exams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(examData)
       });
+      if (res.status === 409) {
+        return { success: false, conflict: true };
+      }
       if (res.ok) {
         return await res.json();
       }
+      const errData = await res.json();
+      return { success: false, error: errData.error || 'Erro ao salvar caderno de provas.' };
     } catch (err) {
       console.warn('Real API createExam unavailable, falling back to local storage:', err);
     }
@@ -358,6 +363,20 @@ export const apiClient = {
     }
 
     const exams = getLocalExams();
+    const existingIndex = exams.findIndex(e => e.title.trim().toLowerCase() === examData.title.trim().toLowerCase());
+    
+    if (existingIndex !== -1) {
+      if (examData.replaceIfExists) {
+        const existingExamId = exams[existingIndex].id;
+        exams.splice(existingIndex, 1);
+        const subs = getLocalSubmissions();
+        const filteredSubs = subs.filter(s => s.examId !== existingExamId);
+        saveLocalSubmissions(filteredSubs);
+      } else {
+        return { success: false, conflict: true };
+      }
+    }
+
     const newExamId = 'exam_local_' + Date.now();
     const newExam: Exam = {
       id: newExamId,
@@ -469,5 +488,62 @@ export const apiClient = {
       console.warn('Real API syncExamToGitHub unavailable:', err);
       return { success: false, error: 'Servidor de API real indisponível para sincronização.' };
     }
+  },
+
+  // DELETE a specific exam
+  async deleteExam(adminToken: string, examId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/exams/${examId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminToken })
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('Real API deleteExam unavailable, using local fallback:', err);
+    }
+
+    // Fallback
+    if (!adminToken || (!adminToken.startsWith('mock_admin_token_') && !adminToken.startsWith('mock_admin_token_local_'))) {
+      return { success: false, error: 'Acesso administrativo negado.' };
+    }
+
+    const exams = getLocalExams();
+    const filtered = exams.filter(e => e.id !== examId);
+    saveLocalExams(filtered);
+
+    // Also clear associated submissions
+    const subs = getLocalSubmissions();
+    const filteredSubs = subs.filter(s => s.examId !== examId);
+    saveLocalSubmissions(filteredSubs);
+
+    return { success: true };
+  },
+
+  // POST clear all exams and submissions structure
+  async clearAllStructure(adminToken: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch('/api/admin/clear-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminToken })
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('Real API clearAllStructure unavailable, using local fallback:', err);
+    }
+
+    // Fallback
+    if (!adminToken || (!adminToken.startsWith('mock_admin_token_') && !adminToken.startsWith('mock_admin_token_local_'))) {
+      return { success: false, error: 'Acesso administrativo negado.' };
+    }
+
+    saveLocalExams([]);
+    saveLocalSubmissions([]);
+    return { success: true };
   }
 };

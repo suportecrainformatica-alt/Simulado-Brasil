@@ -66,12 +66,9 @@ function readDb(): DatabaseSchema {
     if (fs.existsSync(DB_FILE)) {
       const data = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(data) as DatabaseSchema;
-      // Ensure Etec 2025 is always present
-      if (!parsed.exams || parsed.exams.length === 0) {
-        parsed.exams = [etec2025Exam];
-      } else if (!parsed.exams.find(e => e.id === 'etec-2025-1')) {
-        parsed.exams.unshift(etec2025Exam);
-      }
+      if (!parsed.exams) parsed.exams = [];
+      if (!parsed.submissions) parsed.submissions = [];
+      if (!parsed.newsletters) parsed.newsletters = [];
       return parsed;
     }
   } catch (err) {
@@ -524,9 +521,46 @@ app.post('/api/admin/change-password', (req, res) => {
   res.json({ success: true });
 });
 
+// DELETE an exam (Admin option)
+app.delete('/api/exams/:id', (req, res) => {
+  const { adminToken } = req.body;
+  if (!adminToken || !adminToken.startsWith('mock_admin_token_')) {
+    return res.status(403).json({ error: 'Acesso administrativo negado.' });
+  }
+
+  const db = readDb();
+  const examId = req.params.id;
+  const examIndex = db.exams.findIndex(e => e.id === examId);
+  if (examIndex === -1) {
+    return res.status(404).json({ error: 'Caderno de provas não encontrado.' });
+  }
+
+  db.exams.splice(examIndex, 1);
+  // Clean up submissions for this exam as well
+  db.submissions = db.submissions.filter(s => s.examId !== examId);
+  writeDb(db);
+
+  res.json({ success: true });
+});
+
+// POST clear all exams and submissions structure (Admin option)
+app.post('/api/admin/clear-all', (req, res) => {
+  const { adminToken } = req.body;
+  if (!adminToken || !adminToken.startsWith('mock_admin_token_')) {
+    return res.status(403).json({ error: 'Acesso administrativo negado.' });
+  }
+
+  const db = readDb();
+  db.exams = [];
+  db.submissions = [];
+  writeDb(db);
+
+  res.json({ success: true });
+});
+
 // POST add more exams (Admin option)
 app.post('/api/exams', (req, res) => {
-  const { title, description, category, durationMinutes, questions, adminToken } = req.body;
+  const { title, description, category, durationMinutes, questions, adminToken, replaceIfExists } = req.body;
   
   if (!adminToken || !adminToken.startsWith('mock_admin_token_')) {
     return res.status(403).json({ error: 'Acesso administrativo negado.' });
@@ -537,6 +571,23 @@ app.post('/api/exams', (req, res) => {
   }
 
   const db = readDb();
+
+  // Check if an exam with the same title already exists
+  const existingIndex = db.exams.findIndex(e => e.title.trim().toLowerCase() === title.trim().toLowerCase());
+  
+  if (existingIndex !== -1) {
+    if (replaceIfExists) {
+      // Remove existing exam
+      const existingExamId = db.exams[existingIndex].id;
+      db.exams.splice(existingIndex, 1);
+      // Clean up existing submissions for this exam too
+      db.submissions = db.submissions.filter(s => s.examId !== existingExamId);
+    } else {
+      // Return 409 conflict to prompt replacement
+      return res.status(409).json({ error: 'conflict', message: `Já existe um simulado cadastrado com o título "${title}".` });
+    }
+  }
+
   const newExam: Exam = {
     id: 'exam_' + Date.now(),
     title,

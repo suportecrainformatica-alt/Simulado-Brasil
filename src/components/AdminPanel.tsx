@@ -300,6 +300,28 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
     setQuestions(updated);
   };
 
+  // DELETE single exam booklet
+  const handleDeleteExam = async (examId: string, examTitle: string) => {
+    const confirmDelete = window.confirm(`Tem certeza que deseja excluir permanentemente o caderno de provas "${examTitle}"? Todos os gabaritos e históricos de envios de alunos associados a ele também serão apagados.`);
+    if (!confirmDelete) return;
+
+    setError('');
+    setSuccessMessage('');
+    try {
+      const data = await apiClient.deleteExam(token || '', examId);
+      if (data.success) {
+        setSuccessMessage(`Caderno de provas "${examTitle}" excluído com sucesso.`);
+        // Reload list
+        const updatedExams = await apiClient.getExams();
+        setExamsList(updatedExams);
+      } else {
+        setError(data.error || 'Erro ao excluir o caderno de provas.');
+      }
+    } catch (err) {
+      setError('Erro de rede ao excluir o caderno de provas.');
+    }
+  };
+
   // Trigger confirmation modal for new Exam
   const handleCreateExam = (e: React.FormEvent) => {
     e.preventDefault();
@@ -334,7 +356,7 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
     setSuccessMessage('');
 
     try {
-      const data = await apiClient.createExam({
+      let data = await apiClient.createExam({
         title,
         description,
         category,
@@ -342,6 +364,25 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
         questions: questions as Question[],
         adminToken: token || ''
       });
+
+      if (!data.success && data.conflict) {
+        const confirmReplace = window.confirm(`Já existe um caderno de provas cadastrado com o título "${title}". Deseja substituí-lo? Isso excluirá a versão antiga e os resultados de provas/gabaritos enviados anteriormente para este simulado.`);
+        if (confirmReplace) {
+          data = await apiClient.createExam({
+            title,
+            description,
+            category,
+            durationMinutes,
+            questions: questions as Question[],
+            adminToken: token || '',
+            replaceIfExists: true
+          });
+        } else {
+          setIsSubmittingExam(false);
+          setShowConfirmExamModal(false);
+          return;
+        }
+      }
 
       if (data.success) {
         setSuccessMessage('Caderno de provas adicionado com sucesso e disponível no portal!');
@@ -361,9 +402,12 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
           }
         ]);
         setShowConfirmExamModal(false);
+        // Reload exams list
+        const updatedExams = await apiClient.getExams();
+        setExamsList(updatedExams);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
-        setError('Erro ao salvar caderno de provas');
+        setError(data.error || 'Erro ao salvar caderno de provas');
         setShowConfirmExamModal(false);
       }
     } catch (err) {
@@ -1051,6 +1095,64 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
                 </div>
               </div>
             </form>
+
+            {/* REGISTERED EXAMS SECTION WITH DELETE BUTTONS */}
+            <div className="relative flex py-4 items-center">
+              <div className="flex-grow border-t-2 border-slate-200"></div>
+              <span className="flex-shrink mx-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">PROVAS REGISTRADAS NO SISTEMA</span>
+              <div className="flex-grow border-t-2 border-slate-200"></div>
+            </div>
+
+            <div className="p-6 bg-slate-50 border-4 border-slate-900 rounded-[2rem] space-y-5 shadow-[4px_4px_0px_rgba(15,23,42,1)]">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-black text-slate-950 uppercase tracking-tight">Gerenciar Cadernos de Provas</h4>
+                  <p className="text-[10px] text-slate-500 font-bold">Veja as provas cadastradas no portal e gerencie a exclusão de cadernos individuais.</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto border-2 border-slate-900 rounded-2xl bg-white shadow-[3px_3px_0px_black]">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                     <tr className="bg-slate-100 border-b-2 border-slate-900">
+                       <th className="px-4 py-3 text-[10px] font-black text-slate-700 uppercase tracking-wider">Título do Simulado</th>
+                       <th className="px-4 py-3 text-[10px] font-black text-slate-700 uppercase tracking-wider">Categoria</th>
+                       <th className="px-4 py-3 text-[10px] font-black text-slate-700 uppercase tracking-wider">Questões</th>
+                       <th className="px-4 py-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider">Ações</th>
+                     </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {examsList.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-xs text-slate-400 font-bold">Nenhum simulado cadastrado ainda.</td>
+                      </tr>
+                    ) : (
+                      examsList.map(exam => (
+                        <tr key={exam.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 text-xs font-black text-slate-900">{exam.title}</td>
+                          <td className="px-4 py-3 text-xs font-bold text-slate-500">
+                            <span className="px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-md uppercase text-[9px] font-black">
+                              {exam.category}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs font-bold text-slate-500">{exam.questionCount}</td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteExam(exam.id, exam.title)}
+                              className="px-3.5 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-700 font-black uppercase tracking-wider border-2 border-rose-900 rounded-xl text-[9px] transition-all cursor-pointer shadow-[2px_2px_0px_rgba(225,29,72,0.4)] active:translate-x-[1px] active:translate-y-[1px] flex items-center gap-1 ml-auto"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Excluir Caderno
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 

@@ -33,9 +33,6 @@ export default function App() {
   // Global Privacy modal state
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
 
-  // Quick Support Modal state
-  const [isSupportOpen, setIsSupportOpen] = useState(false);
-
   // Fetch Exams from full-stack Node server or localStorage fallback
   const fetchExams = async () => {
     try {
@@ -186,50 +183,94 @@ export default function App() {
               
               {/* BENTO CARD 1: Featured Simulado (Spans 2 columns & 2 rows on large screen) */}
               <div className="lg:col-span-2 lg:row-span-2 bg-white border-4 border-slate-900 rounded-[2rem] p-6 sm:p-8 flex flex-col justify-between shadow-[8px_8px_0px_0px_rgba(15,23,42,1)]" id="bento-featured-card">
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2">
-                    <span className="bg-emerald-300 text-slate-950 text-xs font-black px-3.5 py-1.5 rounded-full uppercase tracking-wider border-2 border-slate-900 shadow-[2px_2px_0px_rgba(15,23,42,1)] inline-flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" /> EM DESTAQUE OFICIAL
-                    </span>
-                    <span className="bg-purple-300 text-slate-950 text-[10px] font-black px-2.5 py-1.5 rounded-full uppercase tracking-wider border-2 border-slate-900">
-                      VESTIBULINHO
-                    </span>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <h2 className="text-3xl sm:text-4xl font-black tracking-tight leading-none text-slate-950">
-                      Simulado ETEC Oficial 2025
-                    </h2>
-                    <p className="text-sm text-slate-600 font-medium leading-relaxed">
-                      Prepare-se para o exame oficial de admissão das ETECs utilizando o caderno de provas adaptado e clicável de 50 questões. 
-                      Ganhe correção imediata por IA e um relatório pedagógico alinhado com as regras de desempate C1 a C5!
-                    </p>
-                  </div>
+                {(() => {
+                  const featuredExam = exams.find(e => e.id === 'etec-2025-1') || exams[0];
+                  if (!featuredExam) {
+                    return (
+                      <div className="h-full flex flex-col justify-between space-y-6">
+                        <div className="space-y-6">
+                          <div className="flex items-center gap-2">
+                            <span className="bg-amber-300 text-slate-950 text-xs font-black px-3.5 py-1.5 rounded-full uppercase tracking-wider border-2 border-slate-900 shadow-[2px_2px_0px_rgba(15,23,42,1)] inline-flex items-center gap-1">
+                              <Sparkles className="w-3 h-3" /> AGUARDANDO PROVAS
+                            </span>
+                          </div>
+                          
+                          <div className="space-y-3">
+                            <h2 className="text-3xl font-black tracking-tight leading-none text-slate-950">
+                              Nenhum caderno de provas disponível
+                            </h2>
+                            <p className="text-sm text-slate-600 font-medium leading-relaxed">
+                              A estrutura foi limpa. Novas provas e gabaritos oficiais podem ser cadastrados ou importados via PDF diretamente na Área Administrativa do portal.
+                            </p>
+                          </div>
+                        </div>
 
-                  <div className="p-4 bg-indigo-50 border-2 border-slate-900 rounded-2xl flex items-start gap-3">
-                    <div className="p-2 bg-indigo-200 border border-slate-900 rounded-lg text-indigo-900 font-bold">
-                      <BookOpenCheck className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-extrabold text-slate-900 text-xs">Exame 100% Clicável e Avaliado</h4>
-                      <p className="text-[11px] text-slate-600 mt-0.5">Clique nas alternativas, responda de forma fluida no celular ou PC e confira o gabarito.</p>
-                    </div>
-                  </div>
-                </div>
+                        <div className="pt-8 border-t-2 border-dashed border-slate-200 mt-6 flex flex-col sm:flex-row items-center gap-4 justify-between">
+                          <div className="text-center sm:text-left">
+                            <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">STATUS DO SISTEMA</p>
+                            <p className="text-xs text-slate-700 font-extrabold mt-0.5">Pronto para novos envios</p>
+                          </div>
+                          <button
+                            onClick={() => setCurrentView('admin')}
+                            className="w-full sm:w-auto px-6 py-4 bg-indigo-500 hover:bg-indigo-600 text-white font-black text-sm rounded-2xl border-2 border-slate-900 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] cursor-pointer active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all flex items-center justify-center gap-2 group"
+                          >
+                            Ir para Área Admin <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
 
-                <div className="pt-8 border-t-2 border-dashed border-slate-200 mt-6 flex flex-col sm:flex-row items-center gap-4 justify-between">
-                  <div className="text-center sm:text-left">
-                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">REQUISITOS DO EXAME</p>
-                    <p className="text-xs text-slate-700 font-extrabold mt-0.5">50 questões objetivas | Limite livre</p>
-                  </div>
-                  <button
-                    onClick={() => handleStartExamFlow('etec-2025-1')}
-                    className="w-full sm:w-auto px-6 py-4 bg-indigo-500 hover:bg-indigo-600 text-white font-black text-sm rounded-2xl border-2 border-slate-900 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] cursor-pointer active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all flex items-center justify-center gap-2 group"
-                    id="btn-start-featured"
-                  >
-                    Iniciar Simulado ETEC <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                  </button>
-                </div>
+                  return (
+                    <div className="h-full flex flex-col justify-between space-y-6">
+                      <div className="space-y-6">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-emerald-300 text-slate-950 text-xs font-black px-3.5 py-1.5 rounded-full uppercase tracking-wider border-2 border-slate-900 shadow-[2px_2px_0px_rgba(15,23,42,1)] inline-flex items-center gap-1">
+                            <Sparkles className="w-3 h-3" /> EM DESTAQUE OFICIAL
+                          </span>
+                          <span className="bg-purple-300 text-slate-950 text-[10px] font-black px-2.5 py-1.5 rounded-full uppercase tracking-wider border-2 border-slate-900">
+                            {featuredExam.category}
+                          </span>
+                        </div>
+                        
+                        <div className="space-y-3">
+                          <h2 className="text-3xl sm:text-4xl font-black tracking-tight leading-none text-slate-950">
+                            {featuredExam.title}
+                          </h2>
+                          <p className="text-sm text-slate-600 font-medium leading-relaxed">
+                            {featuredExam.description || "Prepare-se para o exame oficial utilizando o caderno de provas adaptado e clicável."}
+                          </p>
+                        </div>
+
+                        <div className="p-4 bg-indigo-50 border-2 border-slate-900 rounded-2xl flex items-start gap-3">
+                          <div className="p-2 bg-indigo-200 border border-slate-900 rounded-lg text-indigo-900 font-bold">
+                            <BookOpenCheck className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="font-extrabold text-slate-900 text-xs">Exame 100% Clicável e Avaliado</h4>
+                            <p className="text-[11px] text-slate-600 mt-0.5">Clique nas alternativas, responda de forma fluida no celular ou PC e confira o gabarito.</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-8 border-t-2 border-dashed border-slate-200 mt-6 flex flex-col sm:flex-row items-center gap-4 justify-between">
+                        <div className="text-center sm:text-left">
+                          <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">REQUISITOS DO EXAME</p>
+                          <p className="text-xs text-slate-700 font-extrabold mt-0.5">
+                            {featuredExam.questions?.length || 0} questões objetivas | Limite livre
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleStartExamFlow(featuredExam.id)}
+                          className="w-full sm:w-auto px-6 py-4 bg-indigo-500 hover:bg-indigo-600 text-white font-black text-sm rounded-2xl border-2 border-slate-900 shadow-[4px_4px_0px_0px_rgba(15,23,42,1)] cursor-pointer active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0px_0px_rgba(15,23,42,1)] transition-all flex items-center justify-center gap-2 group"
+                          id="btn-start-featured"
+                        >
+                          Iniciar Simulado {featuredExam.category} <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* BENTO CARD 2: Performance Stats (Spans 1 column) */}
@@ -292,14 +333,15 @@ export default function App() {
               </div>
 
               {/* BENTO CARD 4: Filter Categories Quick-links (Spans 1 column) */}
-              <div className="bg-indigo-50 border-4 border-slate-900 rounded-[2rem] p-6 shadow-[8px_8px_0px_0px_rgba(15,23,42,1)] flex flex-col justify-between" id="bento-categories-card">
+              {/* BENTO CARD 4: Filter Categories Quick-links (Spans 2 columns) */}
+              <div className="lg:col-span-2 bg-indigo-50 border-4 border-slate-900 rounded-[2rem] p-6 shadow-[8px_8px_0px_0px_rgba(15,23,42,1)] flex flex-col justify-between" id="bento-categories-card">
                 <div>
                   <span className="text-xs font-black uppercase tracking-widest text-slate-800 block mb-4">Filtrar Provas</span>
                   <p className="text-xs text-slate-600 leading-normal mb-4">
                     Navegue e selecione cadernos específicos por exame. A lista completa abaixo será filtrada instantaneamente.
                   </p>
                   
-                  <div className="flex flex-col gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                       onClick={() => {
                         setSelectedCategory('TODOS');
@@ -356,31 +398,6 @@ export default function App() {
                 <div className="pt-2">
                   <span className="text-[9px] text-slate-400 font-black uppercase tracking-wider block">CLIQUE PARA FILTRAR</span>
                 </div>
-              </div>
-
-              {/* BENTO CARD 5: Social / Study Advisory (Spans 1 column) */}
-              <div className="bg-emerald-500 border-4 border-slate-900 rounded-[2rem] p-6 text-white flex flex-col justify-between shadow-[8px_8px_0px_0px_rgba(15,23,42,1)]" id="bento-support-card">
-                <div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-black uppercase tracking-wider">Central de Ajuda</span>
-                    <MessageSquare className="w-5 h-5 text-white" />
-                  </div>
-                  
-                  <h3 className="text-xl font-black mt-4 leading-tight">
-                    Plantão Pedagógico
-                  </h3>
-                  <p className="text-xs text-emerald-100 mt-2 leading-relaxed">
-                    Precisa de orientação ou está com dúvidas nos critérios de avaliação? Atendimento interativo pelo WhatsApp simulado!
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => setIsSupportOpen(true)}
-                  className="w-full mt-6 py-3 bg-white hover:bg-emerald-50 text-emerald-900 font-black text-xs uppercase tracking-wider rounded-xl border-2 border-slate-900 shadow-[3px_3px_0px_rgba(15,23,42,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[1px_1px_0px_rgba(15,23,42,1)] transition-all cursor-pointer text-center"
-                  id="btn-whatsapp-support"
-                >
-                  Chamar no WhatsApp
-                </button>
               </div>
 
             </section>
@@ -612,49 +629,7 @@ export default function App() {
         onClose={() => setIsPrivacyOpen(false)}
       />
 
-      {/* Interactive Mock Support Advisory Modal */}
-      {isSupportOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-[2rem] border-4 border-slate-900 max-w-md w-full p-6 shadow-[8px_8px_0px_rgba(15,23,42,1)] space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-black text-slate-950 text-lg">Plantão WhatsApp Pedagógico</h3>
-              <button 
-                onClick={() => setIsSupportOpen(false)}
-                className="w-8 h-8 rounded-full border-2 border-slate-900 flex items-center justify-center font-bold text-slate-500 hover:text-slate-900"
-              >
-                ✕
-              </button>
-            </div>
-            
-            <p className="text-xs text-slate-600 font-semibold leading-relaxed">
-              Você será direcionado para o atendimento interativo do Simulados Brasil para tirar dúvidas sobre cronogramas, critérios ETEC (C1-C5) ou vestibulares do ENEM.
-            </p>
 
-            <div className="p-4 bg-emerald-50 border-2 border-emerald-500 rounded-2xl flex items-center gap-3">
-              <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
-              <p className="text-xs text-emerald-800 font-black">Advisors Online • Resposta em 2 minutos</p>
-            </div>
-
-            <div className="pt-2 flex gap-3">
-              <button
-                onClick={() => setIsSupportOpen(false)}
-                className="flex-1 py-2 border-2 border-slate-900 bg-white rounded-xl text-xs font-black uppercase text-slate-700 hover:bg-slate-50"
-              >
-                Cancelar
-              </button>
-              <a
-                href="https://wa.me/5511999999999"
-                target="_blank"
-                rel="noreferrer"
-                onClick={() => setIsSupportOpen(false)}
-                className="flex-1 py-2 border-2 border-slate-900 bg-emerald-500 text-white rounded-xl text-xs font-black uppercase text-center hover:bg-emerald-600 shadow-[2px_2px_0px_rgba(15,23,42,1)] inline-block"
-              >
-                Iniciar Conversa
-              </a>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Neobrutalist Footer */}
       <footer className="bg-white border-t-4 border-slate-900 py-10 text-center text-xs text-slate-500 font-bold shadow-[0_-4px_0_0_rgba(15,23,42,1)]">
