@@ -422,5 +422,52 @@ export const apiClient = {
       throw new Error('Acesso administrativo negado.');
     }
     return getLocalSubmissions();
+  },
+
+  // GET GitHub sync configuration
+  async getGitHubConfig(adminToken: string): Promise<any> {
+    try {
+      const res = await fetch(`/api/admin/github-config?adminToken=${adminToken}`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('Real API getGitHubConfig unavailable, using local fallback:', err);
+    }
+    const local = localStorage.getItem('simulados_github_config');
+    return local ? JSON.parse(local) : { enabled: false, repo: '', branch: 'main', path: '', syncLog: [] };
+  },
+
+  // POST GitHub sync configuration
+  async saveGitHubConfig(adminToken: string, config: { enabled: boolean; token?: string; repo?: string; branch?: string; path?: string }): Promise<any> {
+    try {
+      const res = await fetch('/api/admin/github-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminToken, ...config })
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('Real API saveGitHubConfig unavailable, using local fallback:', err);
+    }
+    localStorage.setItem('simulados_github_config', JSON.stringify({ ...config, syncLog: [] }));
+    return { success: true };
+  },
+
+  // POST manual trigger sync to GitHub for a specific exam
+  async syncExamToGitHub(adminToken: string, examId: string): Promise<any> {
+    try {
+      const res = await fetch(`/api/admin/github-sync-exam/${examId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminToken })
+      });
+      return await res.json();
+    } catch (err: any) {
+      console.warn('Real API syncExamToGitHub unavailable:', err);
+      return { success: false, error: 'Servidor de API real indisponível para sincronização.' };
+    }
   }
 };

@@ -35,6 +35,21 @@ interface DatabaseSchema {
     date: string;
   }>;
   adminPassword?: string;
+  githubConfig?: {
+    enabled: boolean;
+    token?: string;
+    repo?: string;
+    branch?: string;
+    path?: string;
+    syncLog?: Array<{
+      examId: string;
+      examTitle: string;
+      date: string;
+      success: boolean;
+      url?: string;
+      error?: string;
+    }>;
+  };
 }
 
 // Initial DB template
@@ -93,6 +108,154 @@ function getGeminiClient(): GoogleGenAI | null {
     }
   }
   return aiClient;
+}
+
+function generateExamMarkdown(exam: Exam): string {
+  let md = `# ${exam.title}\n\n`;
+  if (exam.description) {
+    md += `*${exam.description}*\n\n`;
+  }
+  md += `- **Categoria:** ${exam.category}\n`;
+  md += `- **Duração:** ${exam.durationMinutes} minutos\n`;
+  md += `- **Quantidade de Questões:** ${exam.questions?.length || 0}\n\n`;
+  md += `## Questões\n\n`;
+
+  exam.questions?.forEach(q => {
+    md += `### Questão ${q.number}\n\n`;
+    if (q.context) {
+      md += `**Contexto:**\n> ${q.context.replace(/\n/g, '\n> ')}\n\n`;
+    }
+    md += `**Enunciado:**\n${q.text}\n\n`;
+    md += `**Alternativas:**\n`;
+    md += `- **A)** ${q.options.A}\n`;
+    md += `- **B)** ${q.options.B}\n`;
+    md += `- **C)** ${q.options.C}\n`;
+    md += `- **D)** ${q.options.D}\n`;
+    if (q.options.E) {
+      md += `- **E)** ${q.options.E}\n`;
+    }
+    md += `\n`;
+    md += `- **Resposta Correta:** \`${q.correctAnswer}\`\n`;
+    md += `- **Habilidade:** \`${q.skill}\`\n\n`;
+    md += `---\n\n`;
+  });
+
+  return md;
+}
+
+async function pushExamToGitHub(exam: Exam) {
+  const db = readDb();
+  const config = db.githubConfig;
+  if (!config || !config.enabled || !config.token || !config.repo) {
+    console.log('GitHub sync is disabled or not configured.');
+    return null;
+  }
+
+  const repo = config.repo.trim();
+  const branch = config.branch ? config.branch.trim() : 'main';
+  const pathPrefix = config.path ? config.path.trim().replace(/^\/|\/$/g, '') : '';
+  
+  // Clean file names
+  const cleanTitle = exam.title.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 30);
+  const jsonFileName = `prova_${exam.id}_${cleanTitle}.json`;
+  const mdFileName = `prova_${exam.id}_${cleanTitle}.md`;
+
+  const jsonFilePath = pathPrefix ? `${pathPrefix}/${jsonFileName}` : jsonFileName;
+  const mdFilePath = pathPrefix ? `${pathPrefix}/${mdFileName}` : mdFileName;
+
+  const jsonUrl = `https://api.github.com/repos/${repo}/contents/${jsonFilePath}`;
+  const mdUrl = `https://api.github.com/repos/${repo}/contents/${mdFilePath}`;
+
+  const jsonContentStr = JSON.stringify(exam, null, 2);
+  const jsonContentBase64 = Buffer.from(jsonContentStr).toString('base64');
+
+  const mdContentStr = generateExamMarkdown(exam);
+  const mdContentBase64 = Buffer.from(mdContentStr).toString('base64');
+
+  try {
+    // 1. Sync JSON file
+    let jsonSha: string | undefined;
+    const getJsonRes = await fetch(`${jsonUrl}?ref=${branch}`, {
+      headers: {
+        'Authorization': `token ${config.token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'aistudio-build'
+      }
+    });
+
+    if (getJsonRes.status === 200) {
+      const fileData = await getJsonRes.json() as any;
+      jsonSha = fileData.sha;
+    }
+
+    const putJsonBody: any = {
+      message: jsonSha ? `Update exam JSON: ${exam.title}` : `Add exam JSON: ${exam.title}`,
+      content: jsonContentBase64,
+      branch
+    };
+    if (jsonSha) {
+      putJsonBody.sha = jsonSha;
+    }
+
+    const putJsonRes = await fetch(jsonUrl, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `token ${config.token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'aistudio-build'
+      },
+      body: JSON.stringify(putJsonBody)
+    });
+
+    if (!putJsonRes.ok) {
+      const errorMsg = await putJsonRes.text();
+      throw new Error(`Erro na API do GitHub ao salvar JSON: ${putJsonRes.status} ${errorMsg}`);
+    }
+
+    const resJsonData = await putJsonRes.json() as any;
+
+    // 2. Sync Markdown file
+    let mdSha: string | undefined;
+    const getMdRes = await fetch(`${mdUrl}?ref=${branch}`, {
+      headers: {
+        'Authorization': `token ${config.token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'aistudio-build'
+      }
+    });
+
+    if (getMdRes.status === 200) {
+      const fileData = await getMdRes.json() as any;
+      mdSha = fileData.sha;
+    }
+
+    const putMdBody: any = {
+      message: mdSha ? `Update exam Markdown: ${exam.title}` : `Add exam Markdown: ${exam.title}`,
+      content: mdContentBase64,
+      branch
+    };
+    if (mdSha) {
+      putMdBody.sha = mdSha;
+    }
+
+    await fetch(mdUrl, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `token ${config.token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'aistudio-build'
+      },
+      body: JSON.stringify(putMdBody)
+    });
+
+    console.log(`Exam ${exam.id} successfully synced to ${repo} (JSON & Markdown).`);
+    return resJsonData;
+  } catch (err) {
+    console.error(`Failed to push exam ${exam.id} to GitHub:`, err);
+    throw err;
+  }
 }
 
 // API Routes
@@ -400,6 +563,43 @@ app.post('/api/exams', (req, res) => {
   db.exams.push(newExam);
   writeDb(db);
 
+  // Background GitHub sync if enabled
+  const dbConfig = db.githubConfig;
+  if (dbConfig && dbConfig.enabled && dbConfig.token && dbConfig.repo) {
+    pushExamToGitHub(newExam).then(result => {
+      if (result) {
+        const latestDb = readDb();
+        const config = latestDb.githubConfig || { enabled: false };
+        const log = config.syncLog || [];
+        log.unshift({
+          examId: newExam.id,
+          examTitle: newExam.title,
+          date: new Date().toISOString(),
+          success: true,
+          url: result.content?.html_url || result.commit?.html_url || `https://github.com/${config.repo}/blob/${config.branch || 'main'}/${config.path ? config.path + '/' : ''}prova_${newExam.id}.json`
+        });
+        config.syncLog = log.slice(0, 30);
+        latestDb.githubConfig = config;
+        writeDb(latestDb);
+      }
+    }).catch(err => {
+      console.error('Background GitHub sync error:', err);
+      const latestDb = readDb();
+      const config = latestDb.githubConfig || { enabled: false };
+      const log = config.syncLog || [];
+      log.unshift({
+        examId: newExam.id,
+        examTitle: newExam.title,
+        date: new Date().toISOString(),
+        success: false,
+        error: err.message || String(err)
+      });
+      config.syncLog = log.slice(0, 30);
+      latestDb.githubConfig = config;
+      writeDb(latestDb);
+    });
+  }
+
   res.json({ success: true, examId: newExam.id });
 });
 
@@ -652,6 +852,200 @@ app.get('/api/admin/submissions', (req, res) => {
   }
   const db = readDb();
   res.json(db.submissions || []);
+});
+
+// GET GitHub sync configuration (Admin only)
+app.get('/api/admin/github-config', (req, res) => {
+  const { adminToken } = req.query;
+  if (!adminToken || typeof adminToken !== 'string' || !adminToken.startsWith('mock_admin_token_')) {
+    return res.status(403).json({ error: 'Acesso administrativo negado.' });
+  }
+  const db = readDb();
+  const config = db.githubConfig || { enabled: false };
+  
+  // Return a sanitized config (mask the token)
+  const sanitizedToken = config.token ? (config.token.substring(0, 8) + '...' + config.token.substring(config.token.length - 4)) : '';
+  res.json({
+    enabled: config.enabled,
+    repo: config.repo || '',
+    branch: config.branch || 'main',
+    path: config.path || '',
+    hasToken: !!config.token,
+    maskedToken: sanitizedToken,
+    syncLog: config.syncLog || []
+  });
+});
+
+// POST GitHub sync configuration (Admin only)
+app.post('/api/admin/github-config', (req, res) => {
+  const { adminToken, enabled, token, repo, branch, path } = req.body;
+  if (!adminToken || !adminToken.startsWith('mock_admin_token_')) {
+    return res.status(403).json({ error: 'Acesso administrativo negado.' });
+  }
+
+  const db = readDb();
+  const existingConfig = db.githubConfig || { enabled: false };
+  
+  // Keep existing token if the new one is empty
+  let finalToken = token;
+  if (!token && existingConfig.token) {
+    finalToken = existingConfig.token;
+  }
+
+  db.githubConfig = {
+    enabled: !!enabled,
+    token: finalToken || '',
+    repo: repo ? repo.trim() : '',
+    branch: branch ? branch.trim() : 'main',
+    path: path ? path.trim() : '',
+    syncLog: existingConfig.syncLog || []
+  };
+
+  writeDb(db);
+  res.json({ success: true });
+});
+
+// POST Manual sync exam to GitHub (Admin only)
+app.post('/api/admin/github-sync-exam/:id', async (req, res) => {
+  const { adminToken } = req.body;
+  if (!adminToken || !adminToken.startsWith('mock_admin_token_')) {
+    return res.status(403).json({ error: 'Acesso administrativo negado.' });
+  }
+
+  const { id } = req.params;
+  const db = readDb();
+  const exam = db.exams.find(e => e.id === id);
+  if (!exam) {
+    return res.status(404).json({ error: 'Prova não encontrada.' });
+  }
+
+  try {
+    const result = await pushExamToGitHub(exam);
+    if (result) {
+      // Log success in db
+      const latestDb = readDb();
+      const config = latestDb.githubConfig || { enabled: false };
+      const log = config.syncLog || [];
+      const commitUrl = result.content?.html_url || result.commit?.html_url || `https://github.com/${config.repo}/blob/${config.branch || 'main'}/${config.path ? config.path + '/' : ''}prova_${exam.id}.json`;
+      log.unshift({
+        examId: exam.id,
+        examTitle: exam.title,
+        date: new Date().toISOString(),
+        success: true,
+        url: commitUrl
+      });
+      config.syncLog = log.slice(0, 30);
+      latestDb.githubConfig = config;
+      writeDb(latestDb);
+
+      return res.json({ success: true, commitUrl });
+    } else {
+      return res.status(400).json({ error: 'Sincronização desativada ou não configurada.' });
+    }
+  } catch (err: any) {
+    console.error('Error in manual sync:', err);
+    // Log failure in db
+    const latestDb = readDb();
+    const config = latestDb.githubConfig || { enabled: false };
+    const log = config.syncLog || [];
+    log.unshift({
+      examId: exam.id,
+      examTitle: exam.title,
+      date: new Date().toISOString(),
+      success: false,
+      error: err.message || String(err)
+    });
+    config.syncLog = log.slice(0, 30);
+    latestDb.githubConfig = config;
+    writeDb(latestDb);
+
+    return res.status(500).json({ error: 'Falha ao sincronizar com o GitHub: ' + (err.message || err) });
+  }
+});
+
+// GET URL for GitHub OAuth popup
+app.get('/api/auth/github/url', (req, res) => {
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  if (!clientId) {
+    return res.status(400).json({ error: 'Configuração de GitHub OAuth Client ID ausente no servidor. Use a opção de Token de Acesso Pessoal (PAT).' });
+  }
+  
+  // Use dynamically constructed redirect URI matching OAuth guides
+  const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/github/callback`;
+  
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope: 'repo',
+    state: 'github_sync_auth_state'
+  });
+  
+  res.json({ url: `https://github.com/login/oauth/authorize?${params.toString()}` });
+});
+
+// GET GitHub OAuth callback
+app.get(['/api/auth/github/callback', '/api/auth/github/callback/'], async (req, res) => {
+  const { code } = req.query;
+  if (!code) {
+    return res.send('Código de autorização inválido.');
+  }
+
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    return res.send('Configuração do GitHub OAuth Client ID/Secret ausente no servidor.');
+  }
+
+  try {
+    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+      })
+    });
+
+    const tokenData = await tokenRes.json() as any;
+    const accessToken = tokenData.access_token;
+
+    if (!accessToken) {
+      throw new Error(tokenData.error_description || 'Falha ao recuperar token de acesso do GitHub.');
+    }
+
+    const db = readDb();
+    const config = db.githubConfig || { enabled: false };
+    db.githubConfig = {
+      ...config,
+      token: accessToken,
+      enabled: true
+    };
+    writeDb(db);
+
+    res.send(`
+      <html>
+        <body>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: '${accessToken}' }, '*');
+              window.close();
+            } else {
+              window.location.href = '/';
+            }
+          </script>
+          <p>Conectado ao GitHub com sucesso! Esta janela se fechará automaticamente em instantes.</p>
+        </body>
+      </html>
+    `);
+  } catch (err: any) {
+    console.error('GitHub OAuth callback error:', err);
+    res.send(`Erro na autorização do GitHub: ${err.message || err}`);
+  }
 });
 
 // Vite Setup for single page application serving

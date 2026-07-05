@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Plus, Trash2, CheckCircle2, ListFilter, Users, FileText, 
   Lock, ArrowLeft, PlusCircle, CheckCircle, Award, Eye, Clipboard, HelpCircle,
-  RefreshCw, AlertCircle, Sparkles, Upload
+  RefreshCw, AlertCircle, Sparkles, Upload, Github, ExternalLink
 } from 'lucide-react';
 import { Exam, Question } from '../types';
 import { apiClient } from '../lib/apiClient';
@@ -17,8 +17,23 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   
-  // Tab control: 'exams' | 'newsletter' | 'submissions' | 'password'
-  const [activeTab, setActiveTab] = useState<'exams' | 'newsletter' | 'submissions' | 'password'>('exams');
+  // Tab control: 'exams' | 'newsletter' | 'submissions' | 'password' | 'github'
+  const [activeTab, setActiveTab] = useState<'exams' | 'newsletter' | 'submissions' | 'password' | 'github'>('exams');
+
+  // GitHub Integration State
+  const [githubEnabled, setGithubEnabled] = useState(false);
+  const [githubRepo, setGithubRepo] = useState('');
+  const [githubBranch, setGithubBranch] = useState('main');
+  const [githubPath, setGithubPath] = useState('');
+  const [githubToken, setGithubToken] = useState('');
+  const [githubMaskedToken, setGithubMaskedToken] = useState('');
+  const [githubHasToken, setGithubHasToken] = useState(false);
+  const [githubSyncLog, setGithubSyncLog] = useState<any[]>([]);
+  const [githubConfigError, setGithubConfigError] = useState('');
+  const [githubConfigSuccess, setGithubConfigSuccess] = useState('');
+  const [isSavingGithub, setIsSavingGithub] = useState(false);
+  const [isSyncingPastExam, setIsSyncingPastExam] = useState<Record<string, boolean>>({});
+  const [examsList, setExamsList] = useState<any[]>([]);
   
   // New Exam Form states
   const [title, setTitle] = useState('');
@@ -92,7 +107,7 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
     }
   }, []);
 
-  // Fetch admin stats and listings
+  // Fetch admin stats, listings, and GitHub configuration
   useEffect(() => {
     if (!token) return;
 
@@ -105,13 +120,127 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
         // Submissions
         const subsData = await apiClient.getSubmissions(token);
         setSubmissions(subsData);
+
+        // Exams
+        const examsData = await apiClient.getExams();
+        setExamsList(examsData);
+
+        // GitHub config
+        const ghConfig = await apiClient.getGitHubConfig(token);
+        setGithubEnabled(ghConfig.enabled || false);
+        setGithubRepo(ghConfig.repo || '');
+        setGithubBranch(ghConfig.branch || 'main');
+        setGithubPath(ghConfig.path || '');
+        setGithubHasToken(ghConfig.hasToken || false);
+        setGithubMaskedToken(ghConfig.maskedToken || '');
+        setGithubSyncLog(ghConfig.syncLog || []);
       } catch (err) {
         console.error('Error fetching admin data:', err);
       }
     };
 
     fetchAdminData();
-  }, [token, activeTab, successMessage]);
+  }, [token, activeTab, successMessage, githubConfigSuccess]);
+
+  // Listen to OAuth message
+  useEffect(() => {
+    const handleOAuthMessage = async (event: MessageEvent) => {
+      const origin = event.origin;
+      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+        return;
+      }
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        setGithubConfigSuccess('Conectado via GitHub OAuth com sucesso!');
+        if (token) {
+          const ghConfig = await apiClient.getGitHubConfig(token);
+          setGithubEnabled(true);
+          setGithubHasToken(ghConfig.hasToken || false);
+          setGithubMaskedToken(ghConfig.maskedToken || '');
+          setGithubSyncLog(ghConfig.syncLog || []);
+        }
+      }
+    };
+    window.addEventListener('message', handleOAuthMessage);
+    return () => window.removeEventListener('message', handleOAuthMessage);
+  }, [token]);
+
+  const handleSaveGithubConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    
+    setGithubConfigError('');
+    setGithubConfigSuccess('');
+    setIsSavingGithub(true);
+
+    try {
+      const res = await apiClient.saveGitHubConfig(token, {
+        enabled: githubEnabled,
+        token: githubToken,
+        repo: githubRepo,
+        branch: githubBranch,
+        path: githubPath
+      });
+
+      if (res && res.success) {
+        setGithubConfigSuccess('Configurações do GitHub salvas com sucesso!');
+        setGithubToken(''); // Clear the input field for security
+        // Refresh config
+        const ghConfig = await apiClient.getGitHubConfig(token);
+        setGithubHasToken(ghConfig.hasToken || false);
+        setGithubMaskedToken(ghConfig.maskedToken || '');
+        setGithubSyncLog(ghConfig.syncLog || []);
+      } else {
+        setGithubConfigError(res?.error || 'Falha ao salvar as configurações.');
+      }
+    } catch (err: any) {
+      setGithubConfigError('Erro de conexão: ' + (err.message || err));
+    } finally {
+      setIsSavingGithub(false);
+    }
+  };
+
+  const handleSyncExam = async (examId: string) => {
+    if (!token) return;
+    setIsSyncingPastExam(prev => ({ ...prev, [examId]: true }));
+    try {
+      const res = await apiClient.syncExamToGitHub(token, examId);
+      if (res && res.success) {
+        alert('Sincronização concluída com sucesso!');
+        // Refresh sync log
+        const ghConfig = await apiClient.getGitHubConfig(token);
+        setGithubSyncLog(ghConfig.syncLog || []);
+      } else {
+        alert('Erro ao sincronizar: ' + (res?.error || 'Erro desconhecido.'));
+      }
+    } catch (err: any) {
+      alert('Erro de conexão: ' + (err.message || err));
+    } finally {
+      setIsSyncingPastExam(prev => ({ ...prev, [examId]: false }));
+    }
+  };
+
+  const handleConnectGithubOAuth = async () => {
+    try {
+      const response = await fetch('/api/auth/github/url');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'GitHub OAuth não está configurado no servidor. Por favor, utilize a autenticação via Token de Acesso Pessoal (PAT).');
+      }
+      const { url } = await response.json();
+
+      const authWindow = window.open(
+        url,
+        'github_oauth_popup',
+        'width=600,height=700'
+      );
+
+      if (!authWindow) {
+        alert('O popup foi bloqueado pelo navegador. Por favor, permita popups para este site.');
+      }
+    } catch (error: any) {
+      alert(error.message || 'Erro ao iniciar autenticação.');
+    }
+  };
 
   // Questions addition logic
   const addQuestion = () => {
@@ -613,6 +742,21 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
           <Lock className="w-4 h-4" />
           Alterar Senha
         </button>
+        <button
+          onClick={() => {
+            setActiveTab('github');
+            setGithubConfigSuccess('');
+            setGithubConfigError('');
+          }}
+          className={`flex items-center gap-2 px-5 py-3 border-b-4 text-xs uppercase tracking-wider font-black transition-all cursor-pointer ${
+            activeTab === 'github'
+              ? 'border-slate-900 text-slate-950 bg-slate-100 rounded-t-xl'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Github className="w-4 h-4" />
+          GitHub Sincronização
+        </button>
       </div>
 
       {/* Tab Content */}
@@ -1061,6 +1205,254 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
                 Salvar Nova Senha
               </button>
             </form>
+          </div>
+        )}
+
+        {activeTab === 'github' && (
+          <div className="space-y-8">
+            <div>
+              <h3 className="text-xl font-black text-slate-950 uppercase tracking-tight flex items-center gap-2">
+                <Github className="w-6 h-6 text-slate-900" />
+                Sincronização com o GitHub
+              </h3>
+              <p className="text-xs text-slate-600 font-semibold mt-1">
+                Sincronize automaticamente os cadernos de provas criados ou importados neste painel diretamente para um repositório do GitHub em formato JSON estruturado e em Markdown legível.
+              </p>
+            </div>
+
+            {githubConfigSuccess && (
+              <div className="p-4 bg-emerald-100 text-emerald-950 text-xs rounded-xl border-2 border-emerald-900 font-black flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-emerald-600 animate-bounce" />
+                {githubConfigSuccess}
+              </div>
+            )}
+
+            {githubConfigError && (
+              <div className="p-4 bg-red-100 text-red-950 text-xs rounded-xl border-2 border-red-900 font-black flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-red-600" />
+                {githubConfigError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* CONFIGURATION FORM CARD */}
+              <form onSubmit={handleSaveGithubConfig} className="lg:col-span-2 p-6 bg-slate-50 border-4 border-slate-900 rounded-[2rem] space-y-5 shadow-[4px_4px_0px_rgba(15,23,42,1)]">
+                <h4 className="text-sm font-black text-slate-950 uppercase tracking-tight flex items-center gap-1.5 border-b-2 border-slate-200 pb-3">
+                  Configurações do Repositório
+                </h4>
+
+                <div className="flex items-center gap-3 p-3 bg-indigo-50 border-2 border-indigo-200 rounded-2xl">
+                  <input
+                    type="checkbox"
+                    id="githubEnabled"
+                    checked={githubEnabled}
+                    onChange={e => setGithubEnabled(e.target.checked)}
+                    className="w-5 h-5 accent-indigo-600 cursor-pointer"
+                  />
+                  <label htmlFor="githubEnabled" className="text-xs font-black text-indigo-950 cursor-pointer uppercase tracking-tight">
+                    Ativar Sincronização Automática ao Salvar Novas Provas
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-slate-700 uppercase tracking-wider">Repositório do GitHub</label>
+                    <input
+                      type="text"
+                      required={githubEnabled}
+                      placeholder="Ex: Cristiano/simulados-provas"
+                      value={githubRepo}
+                      onChange={e => setGithubRepo(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-white border-2 border-slate-900 rounded-xl text-slate-900 text-xs font-bold transition-all"
+                    />
+                    <p className="text-[9px] text-slate-400 font-bold">Formato: usuario/nome-do-repositorio</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-black text-slate-700 uppercase tracking-wider">Branch</label>
+                    <input
+                      type="text"
+                      required={githubEnabled}
+                      placeholder="Ex: main"
+                      value={githubBranch}
+                      onChange={e => setGithubBranch(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-white border-2 border-slate-900 rounded-xl text-slate-900 text-xs font-bold transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-black text-slate-700 uppercase tracking-wider">Pasta no Repositório (Opcional)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: provas ou content/exams (deixe vazio para a raiz)"
+                    value={githubPath}
+                    onChange={e => setGithubPath(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border-2 border-slate-900 rounded-xl text-slate-900 text-xs font-bold transition-all"
+                  />
+                </div>
+
+                <div className="relative flex py-2 items-center">
+                  <div className="flex-grow border-t-2 border-slate-200"></div>
+                  <span className="flex-shrink mx-4 text-[9px] font-black text-slate-400 uppercase tracking-wider">Método de Conexão</span>
+                  <div className="flex-grow border-t-2 border-slate-200"></div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <button
+                      type="button"
+                      onClick={handleConnectGithubOAuth}
+                      className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black uppercase tracking-wider border-2 border-slate-900 rounded-xl text-[10px] transition-all cursor-pointer shadow-[2px_2px_0px_black] active:translate-x-[1px] active:translate-y-[1px] flex items-center justify-center gap-1.5"
+                    >
+                      <Github className="w-4 h-4" />
+                      Conectar via OAuth (Popup)
+                    </button>
+                    
+                    {githubHasToken && (
+                      <div className="flex items-center gap-1.5 px-4 py-2 bg-emerald-50 border-2 border-emerald-500 rounded-xl text-emerald-950 font-black text-[10px] uppercase">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        GitHub Conectado ({githubMaskedToken || 'Token Ativo'})
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between">
+                      <label className="block text-[10px] font-black text-slate-700 uppercase tracking-wider">Ou insira um Token de Acesso Pessoal (PAT)</label>
+                      <a 
+                        href="https://github.com/settings/tokens/new?scopes=repo&description=Simulados%20Brasil%20Sync" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="text-[9px] text-indigo-600 font-extrabold hover:underline flex items-center gap-1"
+                      >
+                        Gerar Token no GitHub <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                    <input
+                      type="password"
+                      placeholder={githubHasToken ? "•••••••• (Token de acesso já salvo e ativo)" : "Insira o token ghp_..."}
+                      value={githubToken}
+                      onChange={e => setGithubToken(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-white border-2 border-slate-900 rounded-xl text-slate-900 text-xs font-bold transition-all focus:outline-hidden"
+                    />
+                    <p className="text-[9px] text-slate-400 font-bold leading-normal">
+                      Recomenda-se um token com escopo <code className="bg-slate-200 px-1 py-0.5 rounded text-[8px] text-slate-700">repo</code> para que o portal consiga ler, criar e atualizar os arquivos de provas de forma autônoma.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-200 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isSavingGithub}
+                    className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white font-black uppercase tracking-wider border-2 border-slate-900 rounded-xl text-xs transition-all cursor-pointer shadow-[3px_3px_0px_rgba(15,23,42,1)] active:translate-x-[1px] active:translate-y-[1px] disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    {isSavingGithub ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    Salvar Configurações
+                  </button>
+                </div>
+              </form>
+
+              {/* RECENT SYNC STATUS LOG CARD */}
+              <div className="p-6 bg-slate-50 border-4 border-slate-900 rounded-[2rem] space-y-4 shadow-[4px_4px_0px_rgba(15,23,42,1)] flex flex-col max-h-[500px]">
+                <h4 className="text-sm font-black text-slate-950 uppercase tracking-tight flex items-center gap-1.5 border-b-2 border-slate-200 pb-3 shrink-0">
+                  Histórico de Envios
+                </h4>
+
+                <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                  {githubSyncLog.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 flex flex-col items-center justify-center gap-2">
+                      <Github className="w-8 h-8 opacity-20" />
+                      <span className="text-[10px] font-black uppercase tracking-wider">Nenhum envio registrado</span>
+                    </div>
+                  ) : (
+                    githubSyncLog.map((log, index) => (
+                      <div key={index} className="p-3 bg-white border-2 border-slate-900 rounded-xl space-y-2 text-xs shadow-[2px_2px_0px_black]">
+                        <div className="flex justify-between items-start gap-1">
+                          <strong className="text-slate-950 font-black truncate max-w-[150px] block" title={log.examTitle}>
+                            {log.examTitle}
+                          </strong>
+                          <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase ${log.success ? 'bg-emerald-100 text-emerald-800 border border-emerald-400' : 'bg-red-100 text-red-800 border border-red-400'}`}>
+                            {log.success ? 'Sucesso' : 'Erro'}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center text-[9px] text-slate-400 font-bold">
+                          <span>{new Date(log.date).toLocaleString()}</span>
+                          {log.success && log.url && (
+                            <a 
+                              href={log.url} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="text-indigo-600 hover:underline font-extrabold flex items-center gap-0.5 uppercase tracking-tight"
+                            >
+                              Ver no GitHub <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          )}
+                        </div>
+
+                        {!log.success && log.error && (
+                          <div className="p-2 bg-red-50 text-red-900 border border-red-200 rounded-md text-[9px] font-bold font-mono overflow-x-auto">
+                            {log.error}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* SYNC PAST EXAMS TABLE */}
+            <div className="p-6 bg-slate-50 border-4 border-slate-900 rounded-[2rem] space-y-5 shadow-[4px_4px_0px_rgba(15,23,42,1)]">
+              <div>
+                <h4 className="text-sm font-black text-slate-950 uppercase tracking-tight">Sincronizar Simulados Existentes</h4>
+                <p className="text-[10px] text-slate-500 font-bold">Selecione qualquer caderno de provas já cadastrado no sistema para sincronizar manualmente com o repositório configurado.</p>
+              </div>
+
+              <div className="overflow-x-auto border-2 border-slate-900 rounded-2xl bg-white shadow-[3px_3px_0px_black]">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 border-b-2 border-slate-900">
+                      <th className="px-4 py-3 text-[10px] font-black text-slate-700 uppercase tracking-wider">Título do Simulado</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-slate-700 uppercase tracking-wider">Categoria</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-slate-700 uppercase tracking-wider">Questões</th>
+                      <th className="px-4 py-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {examsList.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-xs text-slate-400 font-bold">Nenhum simulado cadastrado.</td>
+                      </tr>
+                    ) : (
+                      examsList.map(exam => (
+                        <tr key={exam.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 text-xs font-black text-slate-900">{exam.title}</td>
+                          <td className="px-4 py-3 text-xs font-bold text-slate-500">
+                            <span className="px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-md uppercase text-[9px] font-black">
+                              {exam.category}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs font-bold text-slate-500">{exam.questionCount}</td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={() => handleSyncExam(exam.id)}
+                              disabled={isSyncingPastExam[exam.id] || !githubHasToken || !githubRepo}
+                              className="px-3.5 py-1.5 bg-white text-slate-900 font-black uppercase tracking-wider border-2 border-slate-900 rounded-xl text-[9px] transition-all cursor-pointer shadow-[2px_2px_0px_black] active:translate-x-[1px] active:translate-y-[1px] hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-300 disabled:shadow-none flex items-center gap-1 ml-auto"
+                            >
+                              {isSyncingPastExam[exam.id] ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Github className="w-3 h-3" />}
+                              Enviar para GitHub
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 
