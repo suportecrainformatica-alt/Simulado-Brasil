@@ -310,6 +310,38 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
         gabaritoPdfBase64 = await gabaritoBase64Promise;
       }
 
+      // Pre-upload files to Gemini Files API to avoid heavy payloads and timeouts in sequential lots
+      setExtractingProgressText('Preparando e enviando os PDFs para a Inteligência Artificial (uma única vez)...');
+      let fileUri = '';
+      let gabaritoFileUri = '';
+
+      try {
+        const uploadRes = await fetch('/api/admin/upload-pdf-file', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            pdfBase64,
+            gabaritoPdfBase64,
+            adminToken: token
+          })
+        });
+
+        if (!uploadRes.ok) {
+          const errData = await uploadRes.json().catch(() => ({}));
+          throw new Error(errData.error || 'Erro ao enviar arquivos para a IA.');
+        }
+
+        const uploadData = await uploadRes.json();
+        if (uploadData.success) {
+          fileUri = uploadData.fileUri || '';
+          gabaritoFileUri = uploadData.gabaritoFileUri || '';
+        }
+      } catch (uploadErr: any) {
+        throw new Error('Falha no pré-processamento de envio do PDF: ' + (uploadErr.message || uploadErr));
+      }
+
       // Configure chunks to process 50 questions in 4 batches (Lotes 1, 2, 3, 4)
       const chunks = [
         { start: 1, end: 12 },
@@ -332,9 +364,9 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            pdfBase64,
+            fileUri,
             gabaritoText: gabaritoText.trim(),
-            gabaritoPdfBase64,
+            gabaritoFileUri,
             adminToken: token,
             startQuestion: chunk.start,
             endQuestion: chunk.end

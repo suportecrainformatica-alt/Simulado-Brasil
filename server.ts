@@ -403,16 +403,12 @@ app.post('/api/exams', (req, res) => {
   res.json({ success: true, examId: newExam.id });
 });
 
-// POST Import Exam from PDF via Gemini
-app.post('/api/admin/import-pdf-exam', async (req, res) => {
-  const { pdfBase64, gabaritoText, gabaritoPdfBase64, adminToken, startQuestion, endQuestion } = req.body;
+// POST Upload Exam and/or Gabarito PDF to Gemini Files API
+app.post('/api/admin/upload-pdf-file', async (req, res) => {
+  const { pdfBase64, gabaritoPdfBase64, adminToken } = req.body;
 
   if (!adminToken || !adminToken.startsWith('mock_admin_token_')) {
     return res.status(403).json({ error: 'Acesso administrativo negado.' });
-  }
-
-  if (!pdfBase64) {
-    return res.status(400).json({ error: 'Nenhum arquivo PDF enviado ou arquivo inválido.' });
   }
 
   const client = getGeminiClient();
@@ -421,12 +417,96 @@ app.post('/api/admin/import-pdf-exam', async (req, res) => {
   }
 
   try {
-    // Strip data prefix if present (e.g., data:application/pdf;base64,...)
-    let cleanBase64 = pdfBase64;
-    if (pdfBase64.includes(';base64,')) {
-      cleanBase64 = pdfBase64.split(';base64,')[1];
+    const responseData: any = { success: true };
+    const tempDir = path.join(process.cwd(), 'temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
     }
 
+    if (pdfBase64) {
+      let cleanBase64 = pdfBase64;
+      if (pdfBase64.includes(';base64,')) {
+        cleanBase64 = pdfBase64.split(';base64,')[1];
+      }
+      const tempFilePath = path.join(tempDir, `exam_${Date.now()}.pdf`);
+      fs.writeFileSync(tempFilePath, Buffer.from(cleanBase64, 'base64'));
+
+      console.log(`Subindo arquivo de prova para Gemini Files API: ${tempFilePath}`);
+      const uploadResult = await client.files.upload({
+        file: tempFilePath,
+        config: {
+          mimeType: 'application/pdf',
+        }
+      });
+
+      try {
+        fs.unlinkSync(tempFilePath);
+      } catch (e) {
+        console.warn('Erro ao deletar arquivo temporário da prova:', e);
+      }
+
+      responseData.fileUri = uploadResult.uri;
+    }
+
+    if (gabaritoPdfBase64) {
+      let cleanGabaritoBase64 = gabaritoPdfBase64;
+      if (gabaritoPdfBase64.includes(';base64,')) {
+        cleanGabaritoBase64 = gabaritoPdfBase64.split(';base64,')[1];
+      }
+      const tempGabaritoPath = path.join(tempDir, `gabarito_${Date.now()}.pdf`);
+      fs.writeFileSync(tempGabaritoPath, Buffer.from(cleanGabaritoBase64, 'base64'));
+
+      console.log(`Subindo arquivo de gabarito para Gemini Files API: ${tempGabaritoPath}`);
+      const uploadResult = await client.files.upload({
+        file: tempGabaritoPath,
+        config: {
+          mimeType: 'application/pdf',
+        }
+      });
+
+      try {
+        fs.unlinkSync(tempGabaritoPath);
+      } catch (e) {
+        console.warn('Erro ao deletar arquivo temporário do gabarito:', e);
+      }
+
+      responseData.gabaritoFileUri = uploadResult.uri;
+    }
+
+    res.json(responseData);
+  } catch (err: any) {
+    console.error('Erro ao subir arquivos para Gemini Files API:', err);
+    res.status(500).json({ error: 'Falha ao processar e enviar arquivo(s) para a IA: ' + (err.message || err) });
+  }
+});
+
+// POST Import Exam from PDF via Gemini
+app.post('/api/admin/import-pdf-exam', async (req, res) => {
+  const { 
+    pdfBase64, 
+    fileUri, 
+    gabaritoText, 
+    gabaritoPdfBase64, 
+    gabaritoFileUri, 
+    adminToken, 
+    startQuestion, 
+    endQuestion 
+  } = req.body;
+
+  if (!adminToken || !adminToken.startsWith('mock_admin_token_')) {
+    return res.status(403).json({ error: 'Acesso administrativo negado.' });
+  }
+
+  if (!pdfBase64 && !fileUri) {
+    return res.status(400).json({ error: 'Nenhum arquivo PDF enviado ou URI de arquivo inválido.' });
+  }
+
+  const client = getGeminiClient();
+  if (!client) {
+    return res.status(500).json({ error: 'Configuração de Inteligência Artificial ausente ou inválida no servidor.' });
+  }
+
+  try {
     const hasRange = typeof startQuestion === 'number' && typeof endQuestion === 'number';
     const rangePrompt = hasRange
       ? `REQUISITO CRÍTICO DE ESCOPO: Você deve ler o PDF e extrair EXCLUSIVAMENTE as questões de número ${startQuestion} a ${endQuestion} (inclusive). O array 'questions' na resposta JSON deve conter EXATAMENTE as questões correspondentes a este intervalo. Não resuma, não use reticências e não inclua nenhuma questão fora deste intervalo.`
@@ -443,7 +523,7 @@ Para cada questão extraída, preencha rigorosamente:
 - "context": qualquer texto introdutório, imagem ou poema compartilhado que venha antes da questão (geralmente indicado como "Leia o texto para responder às questões X e Y"). Deixe em branco se não houver. Mantenha 100% idêntico.
 - "options": um objeto contendo chaves "A", "B", "C", "D", "E" com os respectivos textos das alternativas idênticos ao PDF. Se a prova tiver apenas 4 alternativas (A, B, C, D), preencha "E" como string vazia "".
 - "correctAnswer": uma única letra ("A", "B", "C", "D" ou "E") representando a alternativa correta.
-- "skill": uma classificação baseada nas habilidades de desempate do vestibulinho (C1, C2, C3, C4, C5). Use as seguintes referências para classificar:
+- "skill": uma classificação baseada das habilidades de desempate do vestibulinho (C1, C2, C3, C4, C5). Use as seguintes referências para classificar:
   - C1: Leitura e interpretação (textos, mapas, tabelas, gráficos).
   - C2: Aplicação de conhecimentos básicos e resoluções matemáticas/científicas.
   - C3: Análise crítica, argumentação e dedução lógica.
@@ -454,20 +534,40 @@ REQUISITOS ADICIONAIS:
 1. Não altere o estilo de escrita ou as palavras do enunciado original.
 2. Certifique-se de preencher as alternativas com perfeição.
 
-${gabaritoPdfBase64 ? 'ATENÇÃO: Você recebeu um SEGUNDO arquivo PDF que é o Gabarito Oficial de respostas desta prova. Use-o para extrair rigorosamente as alternativas corretas correspondentes a cada número de questão e mapeá-las no campo "correctAnswer" de cada questão.' : (gabaritoText ? `ATENÇÃO: Use o seguinte Gabarito Oficial fornecido para mapear rigorosamente o campo "correctAnswer" de cada questão:
-"${gabaritoText}"` : 'Se você encontrar a folha de respostas/gabarito oficial no próprio PDF da prova, use-a para mapear o "correctAnswer". Caso contrário, resolva cada questão com precisão para determinar a resposta correta de forma analítica.')}
+${gabaritoFileUri ? 'ATENÇÃO: Use o segundo arquivo PDF (Gabarito Oficial) que foi fornecido para extrair rigorosamente as alternativas corretas correspondentes a cada número de questão e mapeá-las no campo "correctAnswer" de cada questão.' : (gabaritoPdfBase64 ? 'ATENÇÃO: Você recebeu um SEGUNDO arquivo PDF que é o Gabarito Oficial de respostas desta prova. Use-o para extrair rigorosamente as alternativas corretas correspondentes a cada número de questão e mapeá-las no campo "correctAnswer" de cada questão.' : (gabaritoText ? `ATENÇÃO: Use o seguinte Gabarito Oficial fornecido para mapear rigorosamente o campo "correctAnswer" de cada questão:
+"${gabaritoText}"` : 'Se você encontrar a folha de respostas/gabarito oficial no próprio PDF da prova, use-a para mapear o "correctAnswer". Caso contrário, resolva cada questão com precisão para determinar a resposta correta de forma analítica.'))}
 `;
 
-    const contents: any[] = [
-      {
+    const contents: any[] = [];
+
+    if (fileUri) {
+      contents.push({
+        fileData: {
+          fileUri,
+          mimeType: 'application/pdf'
+        }
+      });
+    } else if (pdfBase64) {
+      let cleanBase64 = pdfBase64;
+      if (pdfBase64.includes(';base64,')) {
+        cleanBase64 = pdfBase64.split(';base64,')[1];
+      }
+      contents.push({
         inlineData: {
           mimeType: 'application/pdf',
           data: cleanBase64
         }
-      }
-    ];
+      });
+    }
 
-    if (gabaritoPdfBase64) {
+    if (gabaritoFileUri) {
+      contents.push({
+        fileData: {
+          fileUri: gabaritoFileUri,
+          mimeType: 'application/pdf'
+        }
+      });
+    } else if (gabaritoPdfBase64) {
       let cleanGabaritoBase64 = gabaritoPdfBase64;
       if (gabaritoPdfBase64.includes(';base64,')) {
         cleanGabaritoBase64 = gabaritoPdfBase64.split(';base64,')[1];
