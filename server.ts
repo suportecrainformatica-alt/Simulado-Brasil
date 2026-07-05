@@ -329,11 +329,20 @@ app.post('/api/admin/login', (req, res) => {
   const db = readDb();
   const allowedPassword = db.adminPassword || 'admin123';
   
-  // simple configurable or fallback password admin/admin123 or the dynamic db.adminPassword
-  if (username === 'admin' && (password === allowedPassword || password === 'brasil2026')) {
-    res.json({ success: true, token: 'mock_admin_token_' + Date.now() });
+  const normUsername = username ? username.trim() : '';
+  const normPassword = password ? password.trim() : '';
+
+  if (normUsername === 'admin' && (normPassword === allowedPassword || normPassword === 'brasil2026')) {
+    return res.json({ success: true, token: 'mock_admin_token_' + Date.now() });
+  } else if (normUsername === 'Cristiano' && normPassword === '6754') {
+    return res.json({ success: true, token: 'mock_admin_token_' + Date.now() });
+  } else if (normUsername.toLowerCase() === 'cristiano') {
+    return res.status(401).json({ 
+      error: 'Credenciais administrativas inválidas.', 
+      hint: 'Dica de senha: 4 números' 
+    });
   } else {
-    res.status(401).json({ error: 'Credenciais administrativas inválidas.' });
+    return res.status(401).json({ error: 'Credenciais administrativas inválidas.' });
   }
 });
 

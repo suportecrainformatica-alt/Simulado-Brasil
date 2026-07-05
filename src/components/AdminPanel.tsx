@@ -74,7 +74,8 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
         setToken(data.token);
         localStorage.setItem('admin_token', data.token);
       } else {
-        setError(data.error || 'Credenciais inválidas');
+        const errorMsg = data.hint ? `${data.error || 'Credenciais inválidas.'} (${data.hint})` : (data.error || 'Credenciais inválidas');
+        setError(errorMsg);
       }
     } catch (err) {
       setError('Erro de conexão com o servidor.');
@@ -428,7 +429,7 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
             <input
               type="text"
               required
-              placeholder="admin"
+              placeholder="Ex: Cristiano ou admin"
               value={username}
               onChange={e => setUsername(e.target.value)}
               className="w-full px-4 py-3 bg-white border-2 border-slate-900 rounded-xl text-slate-900 focus:outline-hidden focus:bg-indigo-50 text-xs font-bold transition-all shadow-[2px_2px_0px_rgba(15,23,42,1)]"
@@ -436,7 +437,14 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
           </div>
 
           <div className="space-y-1">
-            <label className="block text-[10px] font-black text-slate-700 uppercase tracking-wider">Senha</label>
+            <div className="flex justify-between items-center">
+              <label className="block text-[10px] font-black text-slate-700 uppercase tracking-wider">Senha</label>
+              {(username.trim().toLowerCase() === 'cristiano' || username.trim() === 'Cristiano') && (
+                <span className="text-[10px] text-indigo-600 font-extrabold animate-pulse">
+                  Dica: 4 números
+                </span>
+              )}
+            </div>
             <input
               type="password"
               required
