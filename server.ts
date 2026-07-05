@@ -405,7 +405,7 @@ app.post('/api/exams', (req, res) => {
 
 // POST Import Exam from PDF via Gemini
 app.post('/api/admin/import-pdf-exam', async (req, res) => {
-  const { pdfBase64, gabaritoText, gabaritoPdfBase64, adminToken } = req.body;
+  const { pdfBase64, gabaritoText, gabaritoPdfBase64, adminToken, startQuestion, endQuestion } = req.body;
 
   if (!adminToken || !adminToken.startsWith('mock_admin_token_')) {
     return res.status(403).json({ error: 'Acesso administrativo negado.' });
@@ -427,12 +427,18 @@ app.post('/api/admin/import-pdf-exam', async (req, res) => {
       cleanBase64 = pdfBase64.split(';base64,')[1];
     }
 
+    const hasRange = typeof startQuestion === 'number' && typeof endQuestion === 'number';
+    const rangePrompt = hasRange
+      ? `REQUISITO CRÍTICO DE ESCOPO: Você deve ler o PDF e extrair EXCLUSIVAMENTE as questões de número ${startQuestion} a ${endQuestion} (inclusive). O array 'questions' na resposta JSON deve conter EXATAMENTE as questões correspondentes a este intervalo. Não resuma, não use reticências e não inclua nenhuma questão fora deste intervalo.`
+      : `REQUISITO CRÍTICO DE ESCOPO: Extraia TODAS as questões da prova presentes no PDF (geralmente 50 questões), sem pular nenhuma.`;
+
     const systemInstruction = `Você é um extrator especialista de provas (vestibulares/concursos como ETEC, ENEM) a partir de arquivos PDF.
 Sua missão é ler o arquivo PDF da prova fornecido e retornar as questões estruturadas exatamente no formato JSON especificado.
-Você DEVE ler e extrair TODAS AS QUESTÕES PRESENTES NO PDF (geralmente 50 questões), sem pular nenhuma, sem truncar, sem resumir e sem omitir nenhuma parte do texto. Mantenha os enunciados, textos de apoio e alternativas 100% idênticos ao arquivo original.
+
+${rangePrompt}
 
 Para cada questão extraída, preencha rigorosamente:
-- "number": o número sequencial exato da questão encontrado no PDF (de 1 a 50).
+- "number": o número sequencial exato da questão encontrado no PDF (por exemplo, de ${startQuestion || 1} a ${endQuestion || 50}).
 - "text": o enunciado completo e idêntico da questão, incluindo fórmulas, tabelas ou contexto imediato em markdown limpo se necessário. Não altere nenhuma palavra e remova apenas o cabeçalho do número da questão do texto.
 - "context": qualquer texto introdutório, imagem ou poema compartilhado que venha antes da questão (geralmente indicado como "Leia o texto para responder às questões X e Y"). Deixe em branco se não houver. Mantenha 100% idêntico.
 - "options": um objeto contendo chaves "A", "B", "C", "D", "E" com os respectivos textos das alternativas idênticos ao PDF. Se a prova tiver apenas 4 alternativas (A, B, C, D), preencha "E" como string vazia "".
@@ -444,9 +450,9 @@ Para cada questão extraída, preencha rigorosamente:
   - C4: Linguagem, manifestações artísticas e comunicação.
   - C5: Avaliação ética, ambiental ou cidadã.
 
-REQUISITO CRÍTICO:
-1. Extraia o caderno de provas INTEIRO. Se a prova tem 50 questões, você DEVE retornar uma lista de 50 objetos no array "questions". Não resuma, não use reticências, e não pare no meio.
-2. Não altere o estilo de escrita ou as palavras do enunciado original.
+REQUISITOS ADICIONAIS:
+1. Não altere o estilo de escrita ou as palavras do enunciado original.
+2. Certifique-se de preencher as alternativas com perfeição.
 
 ${gabaritoPdfBase64 ? 'ATENÇÃO: Você recebeu um SEGUNDO arquivo PDF que é o Gabarito Oficial de respostas desta prova. Use-o para extrair rigorosamente as alternativas corretas correspondentes a cada número de questão e mapeá-las no campo "correctAnswer" de cada questão.' : (gabaritoText ? `ATENÇÃO: Use o seguinte Gabarito Oficial fornecido para mapear rigorosamente o campo "correctAnswer" de cada questão:
 "${gabaritoText}"` : 'Se você encontrar a folha de respostas/gabarito oficial no próprio PDF da prova, use-a para mapear o "correctAnswer". Caso contrário, resolva cada questão com precisão para determinar a resposta correta de forma analítica.')}

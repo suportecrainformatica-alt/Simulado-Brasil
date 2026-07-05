@@ -310,76 +310,112 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
         gabaritoPdfBase64 = await gabaritoBase64Promise;
       }
 
-      setExtractingProgressText('Enviando para Inteligência Artificial (Gemini-3.5-Flash)...');
+      // Configure chunks to process 50 questions in batches of 10
+      const chunks = [
+        { start: 1, end: 10 },
+        { start: 11, end: 20 },
+        { start: 21, end: 30 },
+        { start: 31, end: 40 },
+        { start: 41, end: 50 }
+      ];
 
-      const res = await fetch('/api/admin/import-pdf-exam', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          pdfBase64,
-          gabaritoText: gabaritoText.trim(),
-          gabaritoPdfBase64,
-          adminToken: token
-        })
-      });
+      let allQuestionsCollected: any[] = [];
+      let finalTitle = '';
+      let finalDescription = '';
 
-      let data: any = null;
-      const contentType = res.headers.get('content-type') || '';
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        setExtractingProgressText(`Lote ${i + 1} de ${chunks.length}: Extraindo com IA as questões de ${chunk.start} a ${chunk.end}...`);
+
+        const res = await fetch('/api/admin/import-pdf-exam', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            pdfBase64,
+            gabaritoText: gabaritoText.trim(),
+            gabaritoPdfBase64,
+            adminToken: token,
+            startQuestion: chunk.start,
+            endQuestion: chunk.end
+          })
+        });
+
+        let data: any = null;
+        const contentType = res.headers.get('content-type') || '';
+        
+        if (contentType.includes('application/json')) {
+          try {
+            data = await res.json();
+          } catch (jsonErr) {
+            throw new Error(`Erro ao ler resposta do Lote ${i + 1} como JSON válido.`);
+          }
+        } else {
+          const textResponse = await res.text();
+          console.error(`Resposta não-JSON do servidor no Lote ${i + 1}:`, textResponse);
+          if (textResponse.includes('<html') || textResponse.includes('<!DOCTYPE') || textResponse.includes('The page c') || textResponse.includes('TIMEOUT')) {
+            throw new Error(`Tempo Limite Excedido no Lote ${i + 1}. Como alternativa, tente carregar um arquivo PDF menor ou menor quantidade de páginas.`);
+          } else {
+            throw new Error(`Resposta inesperada do servidor no Lote ${i + 1} (Formato Inválido): ${textResponse.slice(0, 150)}`);
+          }
+        }
+
+        if (!res.ok) {
+          throw new Error(data?.error || `Erro do servidor (${res.status}) no Lote ${i + 1}: Não foi possível processar o lote.`);
+        }
+
+        if (data && data.success) {
+          if (data.title && !finalTitle) finalTitle = data.title;
+          if (data.description && !finalDescription) finalDescription = data.description;
+
+          if (data.questions && Array.isArray(data.questions)) {
+            const parsedChunkQuestions = data.questions.map((q: any, idx: number) => ({
+              number: q.number || (chunk.start + idx),
+              text: q.text || '',
+              context: q.context || '',
+              options: {
+                A: q.options?.A || '',
+                B: q.options?.B || '',
+                C: q.options?.C || '',
+                D: q.options?.D || '',
+                E: q.options?.E || ''
+              },
+              correctAnswer: q.correctAnswer || 'A',
+              skill: q.skill || 'C2'
+            }));
+
+            allQuestionsCollected = [...allQuestionsCollected, ...parsedChunkQuestions];
+          }
+        } else {
+          throw new Error(data?.error || `A IA não conseguiu estruturar as questões do Lote ${i + 1}.`);
+        }
+      }
+
+      setExtractingProgressText('Consolidando e ordenando questões...');
       
-      if (contentType.includes('application/json')) {
-        try {
-          data = await res.json();
-        } catch (jsonErr) {
-          throw new Error('O servidor respondeu, mas a resposta não pôde ser lida como um JSON válido.');
-        }
-      } else {
-        const textResponse = await res.text();
-        console.error('Resposta não-JSON do servidor:', textResponse);
-        if (textResponse.includes('<html') || textResponse.includes('<!DOCTYPE') || textResponse.includes('The page c') || textResponse.includes('TIMEOUT')) {
-          throw new Error('Tempo Limite do Servidor Excedido (Timeout). A leitura de PDFs completos e extração de 50 questões via Inteligência Artificial pode exceder o limite máximo de execução de funções serverless gratuitas do Vercel (geralmente 10 a 15 segundos). Como alternativa, você pode testar com um PDF menor (menos páginas) ou preencher e cadastrar as questões manualmente no formulário abaixo!');
-        } else {
-          throw new Error(`Resposta inesperada do servidor (Formato Inválido): ${textResponse.slice(0, 150)}`);
-        }
-      }
+      if (finalTitle) setTitle(finalTitle);
+      if (finalDescription) setDescription(finalDescription);
 
-      if (!res.ok) {
-        throw new Error(data?.error || `Erro do servidor (${res.status}): Não foi possível processar o PDF.`);
-      }
+      if (allQuestionsCollected.length > 0) {
+        // Deduplicate by number
+        const uniqueQuestionsMap = new Map<number, any>();
+        allQuestionsCollected.forEach(q => {
+          if (q.text && q.text.trim()) {
+            uniqueQuestionsMap.set(q.number, q);
+          }
+        });
 
-      if (data && data.success) {
-        setExtractingProgressText('Ajustando formato das questões...');
+        const sortedQuestions = Array.from(uniqueQuestionsMap.values()).sort((a, b) => a.number - b.number);
+        setQuestions(sortedQuestions);
+        setExtractingSuccessMessage(`Sucesso absoluto! ${sortedQuestions.length} questões foram importadas, unificadas e ordenadas do PDF com sucesso. Revise e salve o simulado completo abaixo!`);
         
-        if (data.title) setTitle(data.title);
-        if (data.description) setDescription(data.description);
-        
-        if (data.questions && Array.isArray(data.questions)) {
-          const parsedQuestions = data.questions.map((q: any, idx: number) => ({
-            number: q.number || idx + 1,
-            text: q.text || '',
-            context: q.context || '',
-            options: {
-              A: q.options?.A || '',
-              B: q.options?.B || '',
-              C: q.options?.C || '',
-              D: q.options?.D || '',
-              E: q.options?.E || ''
-            },
-            correctAnswer: q.correctAnswer || 'A',
-            skill: q.skill || 'C2'
-          }));
-          setQuestions(parsedQuestions);
-          setExtractingSuccessMessage(`Sucesso! ${parsedQuestions.length} questões foram importadas e formatadas do PDF com o gabarito. Revise e salve o simulado abaixo.`);
-          // Clear file selection after success
-          setPdfFile(null);
-          setGabaritoPdfFile(null);
-          setGabaritoText('');
-        } else {
-          throw new Error('Nenhuma questão válida foi encontrada no PDF.');
-        }
+        // Clear file selections
+        setPdfFile(null);
+        setGabaritoPdfFile(null);
+        setGabaritoText('');
       } else {
-        throw new Error(data?.error || 'A IA não conseguiu estruturar as questões.');
+        throw new Error('Nenhuma questão válida pôde ser extraída de nenhum dos lotes.');
       }
     } catch (err: any) {
       console.error(err);
