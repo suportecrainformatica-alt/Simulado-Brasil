@@ -5,6 +5,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { Exam, Question } from '../types';
+import { apiClient } from '../lib/apiClient';
 
 interface ExamTakerProps {
   exam: Exam;
@@ -113,36 +114,27 @@ export default function ExamTaker({ exam, onBack, onSubmitSuccess }: ExamTakerPr
         .replace(/[\u0300-\u036f]/g, "")
         .replace(/[^a-z0-9]/g, "") + '@simuladosbrasil.com';
 
-      // 1. Submit to server
-      const res = await fetch('/api/submissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          examId: exam.id,
-          userName: candidateName,
-          userEmail: normalizedEmail,
-          answers
-        })
+      // 1. Submit through apiClient
+      const data = await apiClient.submitExam({
+        examId: exam.id,
+        userName: candidateName,
+        userEmail: normalizedEmail,
+        answers
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data.success) {
         // Automatically save register details for newsletters as well if accepted
-        await fetch('/api/users/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: candidateName,
-            email: normalizedEmail,
-            newsletterAccepted: newsletterConsent,
-            agreedToPrivacyPolicy: privacyConsent
-          })
+        await apiClient.registerUser({
+          name: candidateName,
+          email: normalizedEmail,
+          newsletterAccepted: newsletterConsent,
+          agreedToPrivacyPolicy: privacyConsent
         });
 
         setShowConfirmModal(false);
         onSubmitSuccess(data.submissionId);
       } else {
-        setError(data.error || 'Ocorreu um erro ao processar seu gabarito.');
+        setError('Ocorreu um erro ao processar seu gabarito.');
         setIsSubmitting(false);
       }
     } catch (err) {

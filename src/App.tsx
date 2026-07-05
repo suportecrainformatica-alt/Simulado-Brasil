@@ -9,6 +9,7 @@ import SubmissionDetail from './components/SubmissionDetail';
 import AdminPanel from './components/AdminPanel';
 import PrivacyPolicyModal from './components/PrivacyPolicyModal';
 import { Exam } from './types';
+import { apiClient } from './lib/apiClient';
 
 export default function App() {
   // Navigation: 'portal' | 'exam' | 'result' | 'admin'
@@ -35,16 +36,13 @@ export default function App() {
   // Quick Support Modal state
   const [isSupportOpen, setIsSupportOpen] = useState(false);
 
-  // Fetch Exams from full-stack Node server on mount
+  // Fetch Exams from full-stack Node server or localStorage fallback
   const fetchExams = async () => {
     try {
-      const res = await fetch('/api/exams');
-      if (res.ok) {
-        const data = await res.json();
-        setExams(data);
-      }
+      const data = await apiClient.getExams();
+      setExams(data);
     } catch (err) {
-      console.error('Error fetching exams from API:', err);
+      console.error('Error fetching exams:', err);
     }
   };
 
@@ -55,12 +53,9 @@ export default function App() {
   // Load complete exam text to start taking
   const handleStartExamFlow = async (examId: string) => {
     try {
-      const res = await fetch(`/api/exams/${examId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedExam(data);
-        setCurrentView('exam');
-      }
+      const data = await apiClient.getExam(examId);
+      setSelectedExam(data);
+      setCurrentView('exam');
     } catch (err) {
       alert('Não foi possível carregar o caderno de provas no momento.');
     }
@@ -88,19 +83,14 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/users/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newsletterName,
-          email: newsletterEmail,
-          newsletterAccepted: true,
-          agreedToPrivacyPolicy: true
-        })
+      const data = await apiClient.registerUser({
+        name: newsletterName,
+        email: newsletterEmail,
+        newsletterAccepted: true,
+        agreedToPrivacyPolicy: true
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data.success) {
         setNewsletterSuccess('Inscrição confirmada com sucesso! Bem-vindo à nossa comunidade.');
         setNewsletterName('');
         setNewsletterEmail('');

@@ -5,6 +5,7 @@ import {
   RefreshCw, AlertCircle, Sparkles, Upload
 } from 'lucide-react';
 import { Exam, Question } from '../types';
+import { apiClient } from '../lib/apiClient';
 
 interface AdminPanelProps {
   onBack: () => void;
@@ -64,13 +65,8 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
     e.preventDefault();
     setError('');
     try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await apiClient.login(username, password);
+      if (data.success && data.token) {
         setToken(data.token);
         localStorage.setItem('admin_token', data.token);
       } else {
@@ -103,18 +99,12 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
     const fetchAdminData = async () => {
       try {
         // Newsletters
-        const newsRes = await fetch(`/api/newsletters?adminToken=${token}`);
-        if (newsRes.ok) {
-          const newsData = await newsRes.json();
-          setNewsletters(newsData);
-        }
+        const newsData = await apiClient.getNewsletters(token);
+        setNewsletters(newsData);
         
         // Submissions
-        const subsRes = await fetch(`/api/admin/submissions?adminToken=${token}`);
-        if (subsRes.ok) {
-          const subsData = await subsRes.json();
-          setSubmissions(subsData);
-        }
+        const subsData = await apiClient.getSubmissions(token);
+        setSubmissions(subsData);
       } catch (err) {
         console.error('Error fetching admin data:', err);
       }
@@ -215,21 +205,16 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
     setSuccessMessage('');
 
     try {
-      const res = await fetch('/api/exams', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          description,
-          category,
-          durationMinutes,
-          questions,
-          adminToken: token
-        })
+      const data = await apiClient.createExam({
+        title,
+        description,
+        category,
+        durationMinutes,
+        questions: questions as Question[],
+        adminToken: token || ''
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data.success) {
         setSuccessMessage('Caderno de provas adicionado com sucesso e disponível no portal!');
         // Reset form
         setTitle('');
@@ -249,7 +234,7 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
         setShowConfirmExamModal(false);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
-        setError(data.error || 'Erro ao salvar caderno de provas');
+        setError('Erro ao salvar caderno de provas');
         setShowConfirmExamModal(false);
       }
     } catch (err) {
@@ -272,17 +257,12 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
     }
 
     try {
-      const res = await fetch('/api/admin/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          adminToken: token,
-          newPassword: newPassword.trim()
-        })
-      });
+      const data = await apiClient.changePassword(
+        token || '',
+        newPassword.trim()
+      );
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data.success) {
         setPasswordSuccess('Senha administrativa atualizada com sucesso!');
         setNewPassword('');
       } else {
@@ -386,7 +366,12 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
       }
     } catch (err: any) {
       console.error(err);
-      setExtractingError(err.message || 'Erro inesperado durante a importação.');
+      const isFetchError = err instanceof TypeError || (err.message && err.message.toLowerCase().includes('fetch'));
+      if (isFetchError) {
+        setExtractingError('Erro de conexão: No Vercel (estático), o recurso de leitura de PDF por Inteligência Artificial requer o servidor Express ativo. Mas você ainda pode preencher e salvar as questões manualmente no formulário abaixo!');
+      } else {
+        setExtractingError(err.message || 'Erro inesperado durante a importação.');
+      }
     } finally {
       setIsExtractingPdf(false);
     }

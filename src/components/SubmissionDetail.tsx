@@ -4,6 +4,7 @@ import {
   ChevronDown, ChevronUp, Share2, Mail, MessageSquare, Sparkles, Star, Clipboard
 } from 'lucide-react';
 import { Question } from '../types';
+import { apiClient } from '../lib/apiClient';
 
 interface SubmissionDetailProps {
   submissionId: string;
@@ -19,13 +20,8 @@ export default function SubmissionDetail({ submissionId, onBackToPortal }: Submi
   useEffect(() => {
     const fetchResult = async () => {
       try {
-        const res = await fetch(`/api/submissions/${submissionId}`);
-        if (res.ok) {
-          const json = await res.json();
-          setData(json);
-        } else {
-          setError('Não foi possível obter o relatório de desempenho do servidor.');
-        }
+        const json = await apiClient.getSubmission(submissionId);
+        setData(json);
       } catch (err) {
         setError('Erro de conexão ao carregar o laudo.');
       } finally {
