@@ -325,13 +325,30 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
         })
       });
 
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Erro ao processar PDF.');
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch (jsonErr) {
+          throw new Error('O servidor respondeu, mas a resposta não pôde ser lida como um JSON válido.');
+        }
+      } else {
+        const textResponse = await res.text();
+        console.error('Resposta não-JSON do servidor:', textResponse);
+        if (textResponse.includes('<html') || textResponse.includes('<!DOCTYPE') || textResponse.includes('The page c') || textResponse.includes('TIMEOUT')) {
+          throw new Error('Tempo Limite do Servidor Excedido (Timeout). A leitura de PDFs completos e extração de 50 questões via Inteligência Artificial pode exceder o limite máximo de execução de funções serverless gratuitas do Vercel (geralmente 10 a 15 segundos). Como alternativa, você pode testar com um PDF menor (menos páginas) ou preencher e cadastrar as questões manualmente no formulário abaixo!');
+        } else {
+          throw new Error(`Resposta inesperada do servidor (Formato Inválido): ${textResponse.slice(0, 150)}`);
+        }
       }
 
-      const data = await res.json();
-      if (data.success) {
+      if (!res.ok) {
+        throw new Error(data?.error || `Erro do servidor (${res.status}): Não foi possível processar o PDF.`);
+      }
+
+      if (data && data.success) {
         setExtractingProgressText('Ajustando formato das questões...');
         
         if (data.title) setTitle(data.title);
@@ -362,7 +379,7 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
           throw new Error('Nenhuma questão válida foi encontrada no PDF.');
         }
       } else {
-        throw new Error(data.error || 'A IA não conseguiu estruturar as questões.');
+        throw new Error(data?.error || 'A IA não conseguiu estruturar as questões.');
       }
     } catch (err: any) {
       console.error(err);
