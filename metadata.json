@@ -1,0 +1,6 @@
+{
+  "name": "Simulados Brasil",
+  "description": "Plataforma de simulados interativos para o vestibulinho Etec, Enem e concursos públicos, com correção inteligente via Inteligência Artificial, área administrativa e gerenciador de newsletter integrado.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
