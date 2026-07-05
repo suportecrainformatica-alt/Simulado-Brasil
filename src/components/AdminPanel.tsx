@@ -310,13 +310,12 @@ export default function AdminPanel({ onBack }: AdminPanelProps) {
         gabaritoPdfBase64 = await gabaritoBase64Promise;
       }
 
-      // Configure chunks to process 50 questions in batches of 10
+      // Configure chunks to process 50 questions in 4 batches (Lotes 1, 2, 3, 4)
       const chunks = [
-        { start: 1, end: 10 },
-        { start: 11, end: 20 },
-        { start: 21, end: 30 },
-        { start: 31, end: 40 },
-        { start: 41, end: 50 }
+        { start: 1, end: 12 },
+        { start: 13, end: 25 },
+        { start: 26, end: 38 },
+        { start: 39, end: 50 }
       ];
 
       let allQuestionsCollected: any[] = [];
